@@ -104,6 +104,7 @@ private:
     bool elementOn;
     reflowState_t reflowState;
     float setpoint;
+    float startingTemp;
     int faultCount;
     
     unsigned long ms1000;

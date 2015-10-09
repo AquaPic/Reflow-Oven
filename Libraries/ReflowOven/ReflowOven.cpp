@@ -41,22 +41,22 @@
 /******************************************************************************/
 void ReflowOven::init (void) {
 /**PID*************************************************************************/
-    //70 sec (Tu) oscillation at 50 gain (Ku)
-    pidVars.gain = 30;          //Ku*0.60
-    pidVars.sampleTime = 5000;  //milliseconds
-    pidVars.iTime = 35000;      //milliseconds Tu*0.5
-    pidVars.dTime = 8750;       //milliseconds Tu*0.125
-    pidVars.minI = -1;
-    pidVars.maxI = 1;
+    //135 sec (Tu) oscillation at 100 gain (Ku)
+    pidVars.gain = 60;          //Ku*0.60
+    pidVars.sampleTime = 2500;  //milliseconds
+    pidVars.iTime = 33750;      //milliseconds Tu*0.5   ::67500
+    pidVars.dTime = 8438;       //milliseconds Tu*0.125 ::16875
+    pidVars.minI = -0.25;
+    pidVars.maxI = 0.75;
     pid = pid_new ();
     pid_init (pid, pidVars);
     
 /**Initial Oven Variables******************************************************/
-    reflowVars.preheatRamp = 1.0f;  // C/sec
+    reflowVars.preheatRamp = 0.8f;  // C/sec
     reflowVars.soakTemp = 150.0f;   // C
-    reflowVars.soakTime = 60;       // sec 
+    reflowVars.soakTime = 60;       // sec
     reflowVars.ramp = 0.6;          // C/sec
-    reflowVars.peakTemp = 215.0f;   // C
+    reflowVars.peakTemp = 225.0f;   // C
     reflowVars.peakTime = 25;       // sec
     
     reflowVars.startTemp = 25.0f;   // C
@@ -65,7 +65,7 @@ void ReflowOven::init (void) {
     reflowVars.cooldownTime = 0;    // sec
     reflowVars.totalTime = 0;       // sec
     reflowVars.soakTempIncrease = 10.0f;    // C
-    reflowVars.cooldownRamp = 6.0f; // C/sec
+    reflowVars.cooldownRamp = 5.0f; // C/sec
     
     temp = tc.readCelsius ();
     
@@ -79,6 +79,7 @@ void ReflowOven::init (void) {
     
 /**Global/Class Variables******************************************************/  
     setpoint = temp;
+    startingTemp = temp;
     runtime = 0;
     reflowState = PREHEAT;
     
@@ -138,9 +139,11 @@ uint32_t ReflowOven::timerService (uint32_t currentTime) {
             ++runtime;
         
             if ((temp > TEMP_ALARM) || (temp > (setpoint + MAX_OVER_SETPOINT))) {
-                turnOvenOff ();
-                soundOn ();
-                ovenGraph.showInfo ("Oven Overheat");
+                if (reflowState != COOLDOWN) {
+                    turnOvenOff ();
+                    soundOn ();
+                    ovenGraph.showInfo ("Oven Overheat");
+                }
             }
 
             switch (reflowState) {
@@ -172,11 +175,11 @@ uint32_t ReflowOven::timerService (uint32_t currentTime) {
                         soundOn ();
                         ovenGraph.showInfo ("Reflow Complete");
                         reflowState = COOLDOWN;
-                        setpoint = reflowVars.startTemp;
                         ovenGraph.updateStage ("Cooldown");
                     }
                     break;
                 case COOLDOWN:
+                    setpoint -= reflowVars.cooldownRamp;
                     if (runtime >= reflowVars.totalTime) {
                         turnOvenOff ();
                         reflowState = PREHEAT;
@@ -189,52 +192,54 @@ uint32_t ReflowOven::timerService (uint32_t currentTime) {
     }
     
     if (ovenOn) {
-        if (ms - msPTerm >= pidVars.sampleTime) {
-            msPTerm = ms;
-            
-            ovenGraph.updateSetpoint (setpoint);
-            
-            float pv = (float)temp / MAX_TEMPERATURE;
-            float sp = setpoint / MAX_TEMPERATURE;
-            //Serial.print ("Present value: ");
-            //Serial.println (pv);
-            //Serial.print ("Setpoint: ");
-            //Serial.println (sp);
-            
-            float dutyCycle = pid_run (pid, pv, sp);
-            elementOffTime = pidVars.sampleTime * dutyCycle + ms;
-            if (dutyCycle != 0.0f)
-                turnElementOn ();
-            
-            //Serial.print ("Current time: ");
-            //Serial.println (ms);
-            //Serial.print ("Duty cycle: ");
-            //Serial.println (dutyCycle);
-            
-            //Serial.print ("Element off time: ");
-            //Serial.println (elementOffTime);
-            //Serial.println ();
-            
-        }
-        
-        // this needs to be after the new elementOffTime is calculated because a duty cycle of 1.0 was getting turned off
-        if (elementOn) {
-            if (ms >= elementOffTime) {
-                turnElementOff ();
+        if (temp > (startingTemp + 10)) {
+            if (ms - msPTerm >= pidVars.sampleTime) {
+                msPTerm = ms;
+                
+                ovenGraph.updateSetpoint (setpoint);
+                
+                float pv = (float)temp / MAX_TEMPERATURE;
+                float sp = setpoint / MAX_TEMPERATURE;
+                //Serial.print ("Present value: ");
+                //Serial.println (pv);
+                //Serial.print ("Setpoint: ");
+                //Serial.println (sp);
+                
+                float dutyCycle = pid_run (pid, pv, sp);
+                elementOffTime = pidVars.sampleTime * dutyCycle + ms;
+                if (dutyCycle != 0.0f)
+                    turnElementOn ();
+                
+                //Serial.print ("Current time: ");
+                //Serial.println (ms);
+                //Serial.print ("Duty cycle: ");
+                //Serial.println (dutyCycle);
+                
+                //Serial.print ("Element off time: ");
+                //Serial.println (elementOffTime);
+                //Serial.println ();
+                
             }
-        }
-        
-        if (pidVars.iTime != 0) {
-            if (ms - msITerm >= pidVars.iTime) {
-                msITerm = ms;
-                pid_calcI (pid);
+            
+            // this needs to be after the new elementOffTime is calculated because a duty cycle of 1.0 was getting turned off
+            if (elementOn) {
+                if (ms >= elementOffTime) {
+                    turnElementOff ();
+                }
             }
-        }
-        
-        if (pidVars.dTime != 0) {
-            if (ms - msDTerm >= pidVars.dTime) {
-                msDTerm = ms;
-                pid_calcD (pid);
+            
+            if (pidVars.iTime != 0) {
+                if (ms - msITerm >= pidVars.iTime) {
+                    msITerm = ms;
+                    pid_calcI (pid);
+                }
+            }
+            
+            if (pidVars.dTime != 0) {
+                if (ms - msDTerm >= pidVars.dTime) {
+                    msDTerm = ms;
+                    pid_calcD (pid);
+                }
             }
         }
     }
@@ -248,6 +253,7 @@ void ReflowOven::turnOvenOn (void) {
     
     temp = (float)tc.readCelsius ();
     setpoint = temp;
+    startingTemp = temp;
     runtime = 0;
     reflowState = PREHEAT;
     

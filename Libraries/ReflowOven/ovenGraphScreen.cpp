@@ -222,9 +222,11 @@ void ovenGraphScreen::runTouch (void) {
                 updateButtons ();
                 break;
             case START_BTN:
-                oven.turnOvenOn ();
-                drawGraph ();
-                updateButtons ();
+                if (oven.temp < 50.0f) {
+                    oven.turnOvenOn ();
+                    drawGraph ();
+                    updateButtons ();
+                }
                 break;
             case ACK_BTN:
                 oven.soundOff ();
